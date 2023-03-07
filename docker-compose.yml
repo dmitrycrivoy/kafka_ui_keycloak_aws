@@ -1,0 +1,109 @@
+version: '3.7'
+
+services:
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:${KAFKA_UI_VERSION}
+    # command: sh -c 'sleep 1000'
+    container_name: kafka-ui
+    ports:
+      - "${KAFKA_UI_PORT}:8080"
+    restart: always
+    environment:
+      - KAFKA_CLUSTERS_0_NAME=local
+      - KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS=broker:9093
+    # auth log/pass - works
+      # - AUTH_TYPE='LOGIN_FORM'
+      # - SPRING_SECURITY_USER_NAME=admin
+      # - SPRING_SECURITY_USER_PASSWORD=pass
+    # auth oauth2 - works in this config only from 0.5.0
+      - AUTH_TYPE=OAUTH2
+      - AUTH_OAUTH2_CLIENT_KEYCLOAK_CLIENTID=${KAFKA_UI_CLIENT_ID}
+      - AUTH_OAUTH2_CLIENT_KEYCLOAK_CLIENTSECRET=${KAFKA_UI_CLIENT_SECRET}
+      - AUTH_OAUTH2_CLIENT_KEYCLOAK_SCOPE=${KAFKA_UI_CLIENT_SCOPE}
+      - AUTH_OAUTH2_CLIENT_KEYCLOAK_ISSUER_URI=${OAUTH_PROTOCOL}://${OAUTH_SERVER}/realms/avataa
+      - AUTH_OAUTH2_CLIENT_KEYCLOAK_CLIENT_NAME=KEYCLOAK
+      - AUTH_OAUTH2_CLIENT_KEYCLOAK_PROVIDER=KEYCLOAK
+      - AUTH_OAUTH2_CLIENT_KEYCLOAK_CUSTOM_PARAMS_TYPE=KEYCLOAK
+    # kafka SASL OAUTHBEARER
+      - KAFKA_CLUSTERS_0_PROPERTIES_SECURITY_PROTOCOL=SASL_PLAINTEXT
+      - KAFKA_CLUSTERS_0_PROPERTIES_SASL_MECHANISM=OAUTHBEARER
+      - KAFKA_CLUSTERS_0_PROPERTIES_SASL_LOGIN_CALLBACK_HANDLER_CLASS=org.apache.kafka.common.security.oauthbearer.secured.OAuthBearerLoginCallbackHandler
+      - KAFKA_CLUSTERS_0_PROPERTIES_SASL_OAUTHBEARER_TOKEN_ENDPOINT_URL=${OAUTH_PROTOCOL}://${OAUTH_SERVER}/realms/avataa/protocol/openid-connect/token
+      - KAFKA_CLUSTERS_0_PROPERTIES_SASL_JAAS_CONFIG=org.apache.kafka.common.security.oauthbearer.OAuthBearerLoginModule required clientId="${KAFKA_CLIENT_ID}" clientSecret="${KAFKA_CLIENT_SECRET}" scope=${OAUTH_LOGIN_SCOPE};
+    networks:
+      - kafka-local
+    depends_on:
+      - broker
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:${KAFKA_VERSION}
+    hostname: zookeeper
+    container_name: zookeeper
+    ports:
+      - "${ZOOKEEPER_PORT}:2181"
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    volumes:
+      - zookeeper_data:/var/lib/zookeeper/data
+      - zookeeper_log:/var/lib/zookeeper/log
+    restart: always
+    networks: 
+      - kafka-local
+
+  broker:
+    image: confluentinc/cp-kafka:${KAFKA_VERSION}
+    hostname: broker
+    container_name: broker
+    ports:
+      # - "29092:29092"
+      # - "9092:9092"
+      - "${BROKER_LISTENER_PORT}:9093"
+    environment:
+      #BASE CONFLUENT ENVIRONMENTS
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: 'zookeeper:2181'
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      #KAFKA SASL SET HANDLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT,SASL_PLAINTEXT:SASL_PLAINTEXT
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:29092,PLAINTEXT_HOST://0.0.0.0:9092,SASL_PLAINTEXT://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://broker:29092,PLAINTEXT_HOST://localhost:9092,SASL_PLAINTEXT://${INSTANCE_PUBLIC_IP}:9093
+      KAFKA_LISTENER_NAME_SASL__PLAINTEXT_OAUTHBEARER_SASL_SERVER_CALLBACK_HANDLER_CLASS: br.com.jairsjunior.security.oauthbearer.OauthAuthenticateValidatorCallbackHandler
+      KAFKA_SASL_ENABLED_MECHANISMS: OAUTHBEARER
+      #KAKFA JAAS CONFIGURATION FILE
+      KAFKA_OPTS: "-Djava.security.auth.login.config=/etc/kafka/kafka_server_jaas.conf"
+      ZOOKEEPER_SASL_ENABLED: "FALSE"
+      #KAFKA INTERBROKER SECURITY
+      KAFKA_SECURITY_INTER_BROKER_PROTOCOL: PLAINTEXT
+      KAFKA_SASL_MECHANISM_INTER_BROKER_PROTOCOL: PLAIN
+      KAFKA_LOG4J_LOGGERS: "kafka.controller=INFO,org.apache.kafka=INFO"
+      KAFKA_LOG4J_ROOT_LOGLEVEL: INFO
+      # OAUTH CONFIGURATION
+      OAUTH_WITH_SSL: "false"
+      OAUTH_LOGIN_SERVER: ${OAUTH_SERVER}
+      OAUTH_LOGIN_ENDPOINT: ${OAUTH_LOGIN_ENDPOINT}
+      OAUTH_LOGIN_GRANT_TYPE: ${OAUTH_LOGIN_GRANT_TYPE}
+      OAUTH_LOGIN_SCOPE: ${OAUTH_LOGIN_SCOPE}
+      OAUTH_AUTHORIZATION: ${OAUTH_AUTHORIZATION}
+      OAUTH_INTROSPECT_SERVER: ${OAUTH_SERVER}
+      OAUTH_INTROSPECT_ENDPOINT: ${OAUTH_INTROSPECT_ENDPOINT}
+      OAUTH_INTROSPECT_AUTHORIZATION: ${OAUTH_AUTHORIZATION}
+    volumes:
+      - ./broker/config/kafka_server_jaas.conf:/etc/kafka/kafka_server_jaas.conf
+      - ./broker/libs/kafka-oauth-1.0.0.jar:/usr/share/java/kafka/kafka-oauth-1.0.0.jar
+      - broker_data:/var/lib/kafka/data
+    restart: always
+    networks: 
+      - kafka-local
+    depends_on:
+      - zookeeper
+
+networks:
+  kafka-local:
+
+volumes:
+  zookeeper_data:
+  zookeeper_log:
+  broker_data:
